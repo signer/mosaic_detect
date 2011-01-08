@@ -1,0 +1,82 @@
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+#
+
+
+import cv
+
+h1 = 8
+h2 = 14
+BLOCK_SIZE = 16
+
+COLOR1 = cv.CV_RGB(0,0,255)
+
+img = cv.LoadImage("./frame.jpg", 0)
+size = (img.width, img.height)
+edge = cv.CreateImage(size, 8, 1)
+color = cv.CreateImage(size, 8, 3)
+
+w = int(img.width/BLOCK_SIZE)
+h = int(img.height/BLOCK_SIZE)
+
+
+# draw grid lines
+# vertical-lines
+
+def dist16(i):
+	d = i%16
+	if (d > 8): d = 16-d
+	if (d > 1): return 0
+	return 2-d
+
+def p(image, i, j):
+	if (i < 0 or j < 0 or i >= image.height or j >= image.width): 
+		return 0
+	else:
+		return image[i, j]
+
+def ComputeDiff(image):
+	w = image.width
+	h = image.height
+	iDiff = cv.CreateImage((w, h), 8, 1)
+	for i in range(0,h-1):
+		for j in range(0,w-1):
+			vx = abs(image[i+1, j] - image[i, j])
+			vy = abs(image[i, j+1] - image[i, j])
+			iDiff[i, j] = (vx+vy)
+			if (iDiff[i, j] > 128): iDiff[i, j] = 255
+	return iDiff
+
+def tracker():
+	global h1, h2
+	cv.Canny(img, edge, h1, h2, 3)
+	cv.CvtColor(edge, color, cv.CV_GRAY2BGR)
+	for x in range(w):
+		cv.Line(color, (x*BLOCK_SIZE, 0), (x*BLOCK_SIZE, img.height-1), COLOR1, 1, 4)
+	for y in range(h):
+		cv.Line(color, (0, y*BLOCK_SIZE), (img.width-1, y*BLOCK_SIZE), COLOR1, 1, 4)
+	cv.ShowImage('edge', color)
+
+def ontracker1(n):
+	global h1
+	h1 = n
+	tracker()
+
+def ontracker2(n):
+	global h2
+	h2 = n
+	tracker()
+
+
+iDiff = ComputeDiff(img)
+
+
+
+# show images
+cv.ShowImage('image', img)
+cv.ShowImage('diff', iDiff) 
+cv.NamedWindow('edge')
+cv.CreateTrackbar('edge-threshold1', 'edge', 1, 300, ontracker1)
+cv.CreateTrackbar('edge-threshold2', 'edge', 1, 300, ontracker2)
+tracker()
+cv.WaitKey(0)
