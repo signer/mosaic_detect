@@ -43,12 +43,9 @@ def ComputeDiff(image):
 		# horizontal lines
 		for k in range(w/16):
 			for l in range(16):
-				tmp[l] = abs(image[i+1, 16*k+l] - image[i, 16*k+l])
-			v = sum(tmp)/16
-			for l in range(16):
-				iDiff[i, 16*k+l] = v
+				iDiff[i, 16*k+l] += abs(image[i+1, 16*k+l] - image[i, 16*k+l])
 	for j in range(w-1):
-		# horizontal lines
+		# vertical lines
 		for k in range(h/16):
 			for l in range(16):
 				tmp[l] = abs(image[16*k+l, j+1] - image[16*k+l, j])
