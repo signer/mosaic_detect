@@ -5,79 +5,137 @@
 
 #define BLOCK_SIZE 16 
 
+#define TOP 0
+#define RIGHT 1
+#define BOTTOM 2
+#define LEFT 3
+
+struct microblock {
+	double val[4];
+	double operator[](int i) const {
+		return val[i];
+	}
+
+	double & operator[](int i){
+		return val[i];
+	}
+};
+
+IplImage *pImage;
+microblock *mb;
+int h16,w16;
+void on_tracker(int thresh){
+	int mosaic_num = 0;
+	IplImage *pColor = cvCreateImage(cvSize(pImage->width, pImage->height), 8, 3);
+	IplImage *pDiff = cvCreateImage(cvSize(pImage->width, pImage->height), 8, 3);
+	cvCvtColor(pImage, pColor, CV_GRAY2BGR);
+	for (int i = 0; i < h16; i++){
+		for (int j = 0; j < w16; j++){
+			int n_edges = 0;
+			for (int k = 0; k < 4; k++){
+				if (mb[i*w16+j][k] >= thresh){
+					n_edges ++;
+				}
+			}
+
+
+			int top = i*16;
+			int left = j*16;
+			int bottom = top+15;
+			int right = left+15;
+			cvLine(pDiff, cvPoint(left, top), cvPoint(right, top),   CV_RGB(0, mb[i*w16+j][TOP]*10, 0), 1, CV_AA, 0);
+			cvLine(pDiff, cvPoint(left, top), cvPoint(left, bottom), CV_RGB(0, mb[i*w16+j][LEFT]*10, 0), 1, CV_AA, 0);
+			cvLine(pDiff, cvPoint(right, top), cvPoint(right, bottom), CV_RGB(0, mb[i*w16+j][RIGHT]*10, 0), 1, CV_AA, 0);
+			cvLine(pDiff, cvPoint(left, bottom), cvPoint(right, bottom), CV_RGB(0, mb[i*w16+j][BOTTOM]*10, 0), 1, CV_AA, 0);
+
+			if (n_edges >= 2){
+				mosaic_num ++;
+				cvRectangle(pColor, cvPoint(left, top), cvPoint(left+15, top+15), CV_RGB(255, 0, 0), 1, CV_AA, 0);
+			}else{
+				cvSet2D(pColor, top, left, CV_RGB(255, 0, 0));
+			}
+
+		}
+	}
+
+	printf("mosaic number = %d\n" , mosaic_num);
+	fflush(stdin);
+	cvShowImage("image", pColor);
+	cvShowImage("diff", pDiff);
+	cvReleaseImage(&pColor);
+	cvReleaseImage(&pDiff);
+
+
+}
+
 int main()
 {
-	IplImage *pImage = cvLoadImage("./frame.jpg", 0);
+	pImage = cvLoadImage("./frame.jpg", 0);
 	if (pImage == NULL)
 		return -1;	
 	
-	int th = 6;	
 	int width = pImage->width;
 	int height = pImage->height;
-	int w     = width/BLOCK_SIZE;
-	int h     = height/BLOCK_SIZE;
-	unsigned char *mb   = new unsigned char[w*h];
-	memset(mb, 0, w*h);
-	IplImage *pDiff  = cvCreateImage(cvSize(width, height), 8, 1);
-	IplImage *pColor = cvCreateImage(cvSize(width, height), 8, 3);
+	 w16     = width/BLOCK_SIZE;
+	 h16     = height/BLOCK_SIZE;
+	mb   = new microblock[w16*h16];
 	// 计算图像的x-梯度和y-梯度值
-	// dx = f(x+1, y) - f(x, y)
-	// dy = f(x, y+1) - f(x, y)
-	for (int i = 0; i < height-1; i++){
-		for (int j = 0; j < width-1; j++){
-			int dx = abs(cvGetReal2D(pImage, i+1, j) - cvGetReal2D(pImage, i, j));
-			int dy = abs(cvGetReal2D(pImage, i, j+1) - cvGetReal2D(pImage, i, j));
-			cvSetReal2D(pDiff, i, j, max(dx, dy));
-		}
+	// fx'(x,y) = abs(f(x+1, y) - f(x, y))
+	// fx"(x,y) = max{fx'(x,y)-f'(x-1,y), fx'(x,y)-f'(x+1,y)}
+	//          = max{abs(f(x+1,y) - f(x,y)) - abs(f(x,y) - f(x-1,y)),
+	//                abs(f(x+1,y) - f(x,y)) - abs(f(x+2,y) - f(x+1,y))}
+	//              
+	// fy'(x,y) = abs(f(x, y+1) - f(x, y))
+	// fy"(x,y) = max(fy'(x, y)-fy'(x, y-1), fy'(x,y)-fy'(x,y-1)
+	//          = max{abs(f(x,y+1) - f(x,y)) - abs(f(x,y) - f(x,y-1)),
+	//                abs(f(x,y+1) - f(x,y)) - abs(f(x,y+2) - f(x,y+1))}
+	
+
+
+	for (int i = 0; i < h16; i++){
+		for (int j = 0; j < w16; j++){
+			int top = i ? (i*16-1) : 0;
+			int left = j ? (j*16-1) : 0;
+
+			double ddy = 0;
+			for (int k = 0; i > 0 && k < 16; k++){
+				double y[4];
+				y[0] = cvGetReal2D(pImage, top-1, left+k);	
+				y[1] = cvGetReal2D(pImage, top, left+k);
+				y[2] = cvGetReal2D(pImage, top+1, left+k);
+				y[3] = cvGetReal2D(pImage, top+2, left+k);
+				ddy += min(abs(y[2] - y[1]) - abs(y[1] - y[0]),
+						   abs(y[2] - y[1]) - abs(y[3] - y[2]));
+			}
+			ddy /= 16;
+			mb[i*w16+j][TOP] = ddy; 
+			if (i > 0){
+				mb[(i-1)*w16+j][BOTTOM] = ddy;
+			}
+
+			double ddx = 0;
+			for (int k = 0; j > 0 && k < 16; k++){
+				double x[4];
+				x[0] = cvGetReal2D(pImage, top+k, left-1);	
+				x[1] = cvGetReal2D(pImage, top+k, left);
+				x[2] = cvGetReal2D(pImage, top+k, left+1);
+				x[3] = cvGetReal2D(pImage, top+k, left+2);
+				ddx += min(abs(x[2] - x[1]) - abs(x[1] - x[0]),
+						   abs(x[2] - x[1]) - abs(x[3] - x[2]));
+			}
+			ddx /= 16;
+			mb[i*w16+j][LEFT] = ddx;
+			if (j > 0){
+				mb[i*w16+j-1][RIGHT] = ddx;
+			}
+		}	
 	}
 
-	cvShowImage("image", pImage);
-	cvShowImage("diff", pDiff);
+	cvNamedWindow("image");
+	int val = 10;
+	cvCreateTrackbar("tracker", "image", &val, 50, on_tracker);
+	on_tracker(val);
 	cvWaitKey(0);
-
-	cvCvtColor(pDiff, pColor, CV_GRAY2BGR);
-	for (int i = 0; i < h; i++){
-		for (int j = 0; j < w; j++){
-			int top = i? (i*BLOCK_SIZE-1) : 0;        // 宏块顶边
-			int left = j? (j*BLOCK_SIZE-1): 0;       // 宏块左边
-			int vtop = 0;            // 宏块顶边的边缘点之和
-			int vleft = 0;           // 宏块左边的边缘点之和
-			for (int k = 0; k < BLOCK_SIZE; k++){
-				double tmp_top = cvGetReal2D(pDiff, top, left+k);
-				double tmp_left = cvGetReal2D(pDiff, top+k, left);
-				vtop += ( tmp_top > th);
-				vleft += (tmp_left > th);
-			}
-
-			if (vtop >= 15){
-				cvLine(pColor, cvPoint(left, top), cvPoint(left+15, top), CV_RGB(255, 0, 0), 1, 4);
-				mb[i*w+j] += 1;
-				if (i > 0){
-					mb[(i-1)*w+j] += 1;
-				}
-			}
-			if (vleft >= 15){
-				cvLine(pColor, cvPoint(left, top), cvPoint(left, top+15), CV_RGB(255, 0, 0), 1, 4);
-				mb[i*w+j] += 1;
-				if (j > 0){
-					mb[i*w+j-1] += 1;
-				}
-			}
-		}
-	}
-
-	cvShowImage("color", pColor);
-	cvWaitKey(0);
-	int mosaic_num = 0;
-	for (int i = 0; i < h; i++){
-		for (int j = 0; j < w; j++){
-			if (mb[i*w+j] >= 3){
-				mosaic_num ++;
-			}
-		}
-	}
-	printf("mosaic number = %d\n" , mosaic_num);
 	cvReleaseImage(&pImage);
-	cvReleaseImage(&pDiff);	
 	return 0;
 }
